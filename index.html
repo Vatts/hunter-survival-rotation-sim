@@ -2,13 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <title>Survival Hunter Sim</title>
     <style>
         :root {
             --bg: #0c0c0c;
-            --panel: #1a1a1a;
             --energy-color: #e6b400;
             --border: #444;
-            --gcd-color: rgba(255, 255, 255, 0.3);
             --spear-green: #2ecc71;
             --sentinel-blue: #3498db;
         }
@@ -26,7 +25,7 @@
             user-select: none;
         }
 
-        /* Buff Icons */
+        /* Buffs */
         .buffs-row { display: flex; gap: 20px; height: 60px; margin-bottom: 10px; align-items: center; }
         .buff {
             display: flex; align-items: center; gap: 10px;
@@ -58,18 +57,25 @@
         }
         .ability img.icon { width: 100%; height: 100%; object-fit: cover; display: block; }
         .ability.disabled { filter: grayscale(1) contrast(0.5); cursor: not-allowed; }
-        
-        /* Sentinel Glow */
         .ability.glow { border-color: var(--sentinel-blue); box-shadow: 0 0 20px var(--sentinel-blue); z-index: 12; animation: pulse-blue 1.5s infinite; }
-        @keyframes pulse-blue { 0% { box-shadow: 0 0 5px var(--sentinel-blue); } 50% { box-shadow: 0 0 25px var(--sentinel-blue); } 100% { box-shadow: 0 0 5px var(--sentinel-blue); } }
+        
+        /* Keybind Label UI */
+        .kb-label {
+            position: absolute; top: 2px; left: 4px;
+            font-size: 0.75rem; font-weight: bold; color: #fff;
+            text-shadow: 1px 1px 2px black; z-index: 15;
+            text-transform: uppercase;
+        }
 
-        /* Cooldown Overlays */
+        @keyframes pulse-blue { 0%, 100% { box-shadow: 0 0 5px var(--sentinel-blue); } 50% { box-shadow: 0 0 25px var(--sentinel-blue); } }
+
+        /* Overlays */
         .cd-overlay { position: absolute; bottom: 0; width: 100%; background: rgba(0,0,0,0.7); height: 0%; z-index: 2; }
         .gcd-overlay { position: absolute; inset: 0; z-index: 5; display: none; }
         .timer-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; font-weight: bold; z-index: 10; text-shadow: 0 0 8px black; color: white; }
         .charges { position: absolute; bottom: 2px; right: 4px; font-size: 1.1rem; font-weight: bold; color: #00ff00; z-index: 11; text-shadow: 1px 1px 2px black; }
 
-        /* Talent Pane */
+        /* Talents */
         .talent-pane {
             background: #111; border: 1px solid #333; border-radius: 8px;
             padding: 20px; width: 620px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
@@ -107,7 +113,6 @@
     </div>
 
     <div class="ability-grid" id="grid"></div>
-
     <div class="talent-pane" id="talent-pane"></div>
 
 <script>
@@ -118,6 +123,11 @@
     const maxEnergy = 100;
     const gcdDuration = 750;
 
+    // Default Keybinds
+    let keybinds = {
+        '1': 1, '2': 2, '3': 3, '4': 4, '5': 5
+    };
+
     const talents = {
         lethal: { name: "Lethal Calibration", desc: "Bomb reduces Boomstick CD by 2s.", active: false, img: "Wildfire Bomb.png" },
         sentinel: { name: "Sentinel", desc: "Tip of Spear grants 20% Sentinel chance.", active: false, img: "Sentinel's Mark.png" },
@@ -127,11 +137,11 @@
     };
 
     const skills = [
-        { id: 1, name: "Raptor Strike", cost: 30, cd: 0, img: 'Raptor Strike.png', maxCharges: 1 },
-        { id: 2, name: "Kill Command", cost: -25, cd: 4, img: 'Kill Command.png', maxCharges: 2 },
-        { id: 3, name: "Wildfire Bomb", cost: 10, cd: 13, img: 'Wildfire Bomb.png', maxCharges: 2 },
-        { id: 4, name: "Boomstick", cost: 50, cd: 45, img: 'Boomstick.png', maxCharges: 1 },
-        { id: 5, name: "Takedown", cost: -50, cd: 90, img: 'Takedown.png', maxCharges: 1 }
+        { id: 1, name: "Raptor Strike", cost: 30, cd: 0, img: 'Raptor Strike.png', maxCharges: 1, currentBind: '1' },
+        { id: 2, name: "Kill Command", cost: -25, cd: 4, img: 'Kill Command.png', maxCharges: 2, currentBind: '2' },
+        { id: 3, name: "Wildfire Bomb", cost: 10, cd: 13, img: 'Wildfire Bomb.png', maxCharges: 2, currentBind: '3' },
+        { id: 4, name: "Boomstick", cost: 50, cd: 45, img: 'Boomstick.png', maxCharges: 1, currentBind: '4' },
+        { id: 5, name: "Takedown", cost: -50, cd: 90, img: 'Takedown.png', maxCharges: 1, currentBind: '5' }
     ];
 
     skills.forEach(s => { s.currentCharges = s.maxCharges; s.chargeTimers = []; });
@@ -140,8 +150,29 @@
     skills.forEach(s => {
         const btn = document.createElement('div');
         btn.className = 'ability'; btn.id = `btn-${s.id}`;
-        btn.onclick = () => useAbility(s.id);
+        
+        // Custom Assignment Logic
+        btn.onmousedown = (e) => {
+            if (e.shiftKey) {
+                e.preventDefault();
+                const newBind = prompt(`Set keybind for ${s.name} (e.g., 'e', 'Shift+e', 'Ctrl+4'):`, s.currentBind);
+                if (newBind !== null) {
+                    // Clean up existing bind for this ID
+                    for (let key in keybinds) {
+                        if (keybinds[key] === s.id) delete keybinds[key];
+                    }
+                    const formattedBind = newBind.toLowerCase().trim();
+                    keybinds[formattedBind] = s.id;
+                    s.currentBind = formattedBind;
+                    updateUI();
+                }
+            } else {
+                useAbility(s.id);
+            }
+        };
+
         btn.innerHTML = `
+            <div class="kb-label" id="kb-${s.id}">${s.currentBind}</div>
             <img src="${s.img}" class="icon" alt="${s.name}">
             <div class="gcd-overlay" id="gcd-${s.id}"><svg style="transform:rotate(-90deg)" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="rgba(0,0,0,0.5)" stroke="rgba(255,255,255,0.4)" stroke-width="100" stroke-dasharray="314" stroke-dashoffset="314" id="circle-${s.id}" /></svg></div>
             <div class="cd-overlay" id="cd-${s.id}"></div>
@@ -151,21 +182,35 @@
         grid.appendChild(btn);
     });
 
+    // Talent setup
     const tPane = document.getElementById('talent-pane');
     for(let key in talents) {
         const card = document.createElement('div');
         card.className = 'talent-card';
         card.onclick = () => { talents[key].active = !talents[key].active; card.classList.toggle('selected'); };
-        card.innerHTML = `
-            <img src="${talents[key].img}">
-            <div class="talent-info">
-                <span class="talent-name">${talents[key].name}</span>
-                <span class="talent-desc">${talents[key].desc}</span>
-            </div>`;
+        card.innerHTML = `<img src="${talents[key].img}"><div class="talent-info"><span class="talent-name">${talents[key].name}</span><span class="talent-desc">${talents[key].desc}</span></div>`;
         tPane.appendChild(card);
     }
 
-    // Faster Energy Regen: +1.2 per 100ms (12 Focus/sec)
+    // Keydown Listener with Modifier Support
+    window.addEventListener('keydown', (e) => {
+        if (e.key === "Shift" || e.key === "Control" || e.key === "Alt") return;
+
+        let combo = [];
+        if (e.ctrlKey) combo.push('ctrl');
+        if (e.shiftKey) combo.push('shift');
+        if (e.altKey) combo.push('alt');
+        combo.push(e.key.toLowerCase());
+
+        const bindString = combo.join('+');
+        
+        if (keybinds[bindString]) {
+            e.preventDefault();
+            useAbility(keybinds[bindString]);
+        }
+    });
+
+    // Regeneration
     setInterval(() => { if (energy < maxEnergy) energy = Math.min(maxEnergy, energy + 1.2); updateUI(); }, 100);
 
     function reduceCD(skillId, seconds) {
@@ -233,6 +278,7 @@
 
         skills.forEach(s => {
             const btn = document.getElementById(`btn-${s.id}`);
+            document.getElementById(`kb-${s.id}`).innerText = s.currentBind;
             if (isGCDActive || (energy < s.cost && s.cost > 0) || s.currentCharges <= 0) btn.classList.add('disabled');
             else btn.classList.remove('disabled');
         });
@@ -262,4 +308,3 @@
 </script>
 </body>
 </html>
- 
