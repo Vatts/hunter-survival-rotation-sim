@@ -27,12 +27,16 @@
             overflow: hidden;
         }
 
-        /* Sound Toggle */
+        /* Sound Control */
         #sound-ctrl {
-            position: absolute; top: 10px; right: 10px;
-            background: #222; border: 1px solid #444; color: #fff;
-            padding: 5px 10px; border-radius: 4px; cursor: pointer;
+            position: absolute; top: 15px; right: 15px;
+            background: #e6b400; border: none; color: #000;
+            padding: 10px 20px; border-radius: 5px; cursor: pointer;
+            font-weight: bold; font-size: 14px;
+            box-shadow: 0 0 10px rgba(230, 180, 0, 0.4);
+            transition: 0.2s;
         }
+        #sound-ctrl.enabled { background: #2ecc71; box-shadow: 0 0 10px rgba(46, 204, 113, 0.4); }
 
         /* Error Message Styles */
         #error-container {
@@ -41,18 +45,18 @@
         }
 
         .error-msg {
-            color: var(--fail-red); font-size: 1.8rem; font-weight: bold;
-            text-shadow: 0 0 10px rgba(255,0,0,0.5), 2px 2px 2px black;
+            color: var(--fail-red); font-size: 2rem; font-weight: bold;
+            text-shadow: 0 0 10px rgba(255,0,0,0.8), 2px 2px 2px black;
             margin-bottom: 5px; animation: fail-float 1.2s forwards;
         }
 
         @keyframes fail-float {
             0% { opacity: 0; transform: translateY(20px) scale(0.8); }
-            20% { opacity: 1; transform: translateY(0) scale(1.1); }
-            100% { opacity: 0; transform: translateY(-60px) scale(1); }
+            15% { opacity: 1; transform: translateY(0) scale(1.2); }
+            100% { opacity: 0; transform: translateY(-80px) scale(1); }
         }
 
-        /* Standard UI Styles */
+        /* Logic for regular UI elements remains the same */
         .buffs-row { display: flex; gap: 20px; height: 60px; margin-bottom: 10px; align-items: center; }
         .buff { display: flex; align-items: center; gap: 10px; padding: 5px 15px; border-radius: 4px; background: rgba(0,0,0,0.8); border: 2px solid transparent; opacity: 0; transition: 0.2s; }
         .buff.active { opacity: 1; }
@@ -86,7 +90,7 @@
 </head>
 <body>
 
-    <button id="sound-ctrl" onclick="toggleSound()">Sound: OFF</button>
+    <button id="sound-ctrl" onclick="initAudio()">SOUND: OFF (Click to Enable)</button>
     <div id="error-container"></div>
 
     <div class="buffs-row">
@@ -115,18 +119,38 @@
     let isGCDActive = false;
     let spearStacks = 0;
     let hasSentinelMark = false;
-    let soundEnabled = false;
+    let audioCtx = null;
     const maxEnergy = 100;
     const gcdDuration = 750;
 
-    // Use a standard Web Audio beep or a reliable URL
-    const errorSound = new Audio('https://cdn.pixabay.com/audio/2022/03/10/audio_c3561e125b.mp3');
+    // Web Audio Synthesizer (The "Ding")
+    function playErrorSound() {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // High A note
+        osc.frequency.exponentialRampToValueAtTime(110, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.1);
+    }
 
-    function toggleSound() {
-        soundEnabled = !soundEnabled;
-        document.getElementById('sound-ctrl').innerText = `Sound: ${soundEnabled ? 'ON' : 'OFF'}`;
-        // Brief silent play to unlock audio on mobile/chrome
-        errorSound.play().then(() => { errorSound.pause(); errorSound.currentTime = 0; }).catch(e => {});
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            document.getElementById('sound-ctrl').innerText = "SOUND: ON";
+            document.getElementById('sound-ctrl').classList.add('enabled');
+            // Play a silent buffer to wake up the context
+            const buffer = audioCtx.createBuffer(1, 1, 22050);
+            const node = audioCtx.createBufferSource();
+            node.buffer = buffer;
+            node.connect(audioCtx.destination);
+            node.start(0);
+        }
     }
 
     const keybinds = { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5 };
@@ -150,10 +174,7 @@
     skills.forEach(s => { s.currentCharges = s.maxCharges; s.chargeTimers = []; });
 
     function showFail(text) {
-        if (soundEnabled) {
-            errorSound.currentTime = 0;
-            errorSound.play().catch(e => console.log("Audio block:", e));
-        }
+        playErrorSound();
         const container = document.getElementById('error-container');
         const div = document.createElement('div');
         div.className = 'error-msg';
@@ -162,7 +183,6 @@
         setTimeout(() => div.remove(), 1200);
     }
 
-    // Build Ability Grid
     const grid = document.getElementById('grid');
     skills.forEach(s => {
         const btn = document.createElement('div');
@@ -183,7 +203,6 @@
         grid.appendChild(btn);
     });
 
-    // Build Talents
     const tPane = document.getElementById('talent-pane');
     for(let key in talents) {
         const card = document.createElement('div');
@@ -193,7 +212,6 @@
         tPane.appendChild(card);
     }
 
-    // Key Listeners
     window.addEventListener('keydown', (e) => {
         if (["Shift", "Control", "Alt"].includes(e.key)) return;
         let combo = [];
@@ -205,7 +223,6 @@
         if (keybinds[bindString]) { e.preventDefault(); useAbility(keybinds[bindString]); }
     });
 
-    // Energy Regen
     setInterval(() => { if (energy < maxEnergy) energy = Math.min(maxEnergy, energy + 1.2); updateUI(); }, 100);
 
     function useAbility(id) {
@@ -213,26 +230,18 @@
         if (isGCDActive || (energy < s.cost && s.cost > 0) || s.currentCharges <= 0) return;
 
         // --- MISTAKE LOGIC ---
-        
-        // 1. Kill Command waste check (ID 2)
         if (id === 2 && spearStacks >= 2) {
             showFail("WASTING SPEAR STACKS!");
             return;
         }
-
-        // 2. Generic No-Spear check (Every spender except Kill Command)
         if (id !== 2 && spearStacks === 0) {
             showFail("MISSING TIP OF THE SPEAR!");
             return;
         }
-
-        // 3. Bomb Sentinel check (ID 3)
         if (id === 3 && s.currentCharges < 2 && !hasSentinelMark) {
             showFail("NO SENTINEL MARK!");
             return;
         }
-
-        // ---------------------
 
         energy = Math.max(0, Math.min(maxEnergy, energy - s.cost));
         
